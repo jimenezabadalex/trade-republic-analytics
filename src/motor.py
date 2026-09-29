@@ -13,59 +13,105 @@ def procesar_csv():
     archivo = archivos_csv[0]
     print(f"📄 Analizando cartera desde: {archivo.name}...\n")
     
-    # Cargamos el CSV (forzamos los tipos numéricos para evitar errores)
     df = pd.read_csv(archivo)
     
-    # Rellenamos los vacíos (NaN) con 0 en las columnas de dinero
-    for col in ['amount', 'fee', 'tax']:
+    # 0. LIMPIEZA Y PREPARACIÓN DE DATOS
+    for col in ['amount', 'fee', 'tax', 'shares', 'price']:
         if col in df.columns:
             df[col] = df[col].fillna(0.0)
+            
+    # CRUCIAL: Ordenamos cronológicamente (del más antiguo al más nuevo)
+    # Trade Republic los da del más nuevo al más antiguo, si no le damos la vuelta, las mates fallan.
+    df['datetime'] = pd.to_datetime(df['datetime'])
+    df = df.sort_values('datetime', ascending=True).reset_index(drop=True)
 
-    # ---------------------------------------------------------
-    # PILAR 1: CAPITAL NETO APORTADO (Cash Flow)
-    # ---------------------------------------------------------
+    # Variables Pilares 1 y 2
     tipos_ingreso = ['TRANSFER_INSTANT_INBOUND', 'CUSTOMER_INPAYMENT']
     tipos_retirada = ['TRANSFER_INSTANT_OUTBOUND']
-    
-    # Filtramos y sumamos (round para evitar decimales infinitos de Python)
     total_ingresado = df[df['type'].isin(tipos_ingreso)]['amount'].sum()
-    
-    # Las retiradas suelen venir en negativo, así que usamos abs() por si acaso o sumamos directamente
     total_retirado = df[df['type'].isin(tipos_retirada)]['amount'].sum()
-    
-    capital_neto = total_ingresado + total_retirado # Sumamos porque el retirado ya es negativo
-
-    # ---------------------------------------------------------
-    # PILAR 2: EFICIENCIA OPERATIVA (Costes de Fricción)
-    # ---------------------------------------------------------
-    total_comisiones = df['fee'].sum()
-    total_impuestos = df['tax'].sum()
-    coste_total = total_comisiones + total_impuestos
-
-    # ---------------------------------------------------------
-    # PILAR 4 (Parcial): INGRESOS PASIVOS
-    # ---------------------------------------------------------
+    capital_neto = total_ingresado + total_retirado
+    coste_friccion = df['fee'].sum() + df['tax'].sum()
     total_intereses = df[df['type'] == 'INTEREST_PAYMENT']['amount'].sum()
 
+    # ---------------------------------------------------------
+    # PILAR 3: CARTERA VIVA Y PRECIO MEDIO (Average Cost Basis)
+    # ---------------------------------------------------------
+    cartera = {}
+    
+    for index, row in df.iterrows():
+        tipo = row['type']
+        activo = row['name']
+        acciones = row['shares']
+        precio = row['price']
+        
+        # Solo procesamos compras y ventas de activos válidos
+        if pd.isna(activo) or acciones == 0 or tipo not in ['BUY', 'SELL']:
+            continue
+            
+        if activo not in cartera:
+            cartera[activo] = {'Acciones': 0.0, 'Precio_Medio': 0.0, 'Invertido': 0.0}
+            
+        pos = cartera[activo]
+        
+        if tipo == 'BUY':
+            nuevo_total = pos['Acciones'] + acciones
+            coste_compra = acciones * precio
+            pos['Invertido'] += coste_compra
+            pos['Acciones'] = nuevo_total
+            if pos['Acciones'] > 0:
+                pos['Precio_Medio'] = pos['Invertido'] / pos['Acciones']
+                
+        elif tipo == 'SELL':
+            pos['Acciones'] -= acciones
+            # Reducimos el capital invertido proporcionalmente
+            pos['Invertido'] -= (acciones * pos['Precio_Medio'])
+            
+            # Limpieza por errores de redondeo de decimales (ej. 0.000000001 acciones)
+            if pos['Acciones'] <= 1e-6:
+                pos['Acciones'] = 0.0
+                pos['Invertido'] = 0.0
+                pos['Precio_Medio'] = 0.0
+
+    # Convertimos el diccionario en un DataFrame para mostrarlo bonito
+    df_cartera = pd.DataFrame.from_dict(cartera, orient='index')
+    # Filtramos para mostrar solo las posiciones que aún tienes abiertas (>0)
+    df_cartera = df_cartera[df_cartera['Acciones'] > 0]
+    # Ordenamos de mayor a menor capital invertido
+    df_cartera = df_cartera.sort_values('Invertido', ascending=False)
+
+
     # --- IMPRESIÓN DEL INFORME PATRIMONIAL ---
-    print("="*50)
-    print(" 🏛️  PANEL DE GESTIÓN PATRIMONIAL - FASE 1")
-    print("="*50)
+    print("="*60)
+    print(" 🏛️  PANEL DE GESTIÓN PATRIMONIAL - TRADE REPUBLIC")
+    print("="*60)
     
     print("\n💰 1. FLUJO DE CAJA (NET INFLOWS)")
-    print(f"   + Depósitos totales:      {total_ingresado:,.2f} €")
-    print(f"   - Retiradas totales:      {total_retirado:,.2f} €")
-    print(f"   ---------------------------------------")
     print(f"   => CAPITAL NETO EN RIESGO: {capital_neto:,.2f} €")
     
     print("\n🩸 2. COSTES DE FRICCIÓN (EFICIENCIA)")
-    print(f"   - Comisiones pagadas (fee): {total_comisiones:,.2f} €")
-    print(f"   - Impuestos retenidos (tax): {total_impuestos:,.2f} €")
+    print(f"   => Comisiones e Impuestos: {coste_friccion:,.2f} €")
     
     print("\n💸 3. RENDIMIENTO PASIVO")
-    print(f"   + Intereses de la cuenta:    {total_intereses:,.2f} €")
+    print(f"   => Intereses de la cuenta: {total_intereses:,.2f} €")
     
-    print("\n" + "="*50)
+    print("\n" + "="*60)
+    print(" 📊 4. CARTERA ABIERTA (POSICIONES ACTUALES)")
+    print("="*60)
+    
+    if df_cartera.empty:
+        print("   No hay posiciones abiertas actualmente.")
+    else:
+        # Formateamos los números para que se vean como moneda y con 2/4 decimales
+        df_mostrar = df_cartera.copy()
+        df_mostrar['Acciones'] = df_mostrar['Acciones'].apply(lambda x: f"{x:,.4f}")
+        df_mostrar['Precio_Medio'] = df_mostrar['Precio_Medio'].apply(lambda x: f"{x:,.2f} €")
+        df_mostrar['Invertido'] = df_mostrar['Invertido'].apply(lambda x: f"{x:,.2f} €")
+        
+        # Ajustamos para que Pandas imprima todas las filas en la consola
+        pd.set_option('display.max_rows', None)
+        print(df_mostrar.to_string())
 
 if __name__ == "__main__":
     procesar_csv()
+    
