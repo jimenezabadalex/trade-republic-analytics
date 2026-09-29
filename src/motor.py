@@ -22,10 +22,7 @@ def procesar_csv():
     df['datetime'] = pd.to_datetime(df['datetime'])
     df = df.sort_values('datetime', ascending=True).reset_index(drop=True)
 
-    # ---------------------------------------------------------
-    # PILAR 1 Y 2: FLUJOS DE CAJA Y COSTES
-    # ---------------------------------------------------------
-    # NUEVO: Añadidos nombres de transferencias estándar por si dejas de usar las instantáneas
+    # PILAR 1 Y 2
     tipos_ingreso = ['TRANSFER_INSTANT_INBOUND', 'CUSTOMER_INPAYMENT', 'TRANSFER_INBOUND']
     tipos_retirada = ['TRANSFER_INSTANT_OUTBOUND', 'TRANSFER_OUTBOUND']
     
@@ -35,21 +32,18 @@ def procesar_csv():
     
     total_comisiones = df['fee'].sum()
     total_impuestos = df['tax'].sum()
-    
-    # NUEVO: Capturamos la devolución de impuestos (su amount suele ser positivo)
     optimizacion_fiscal = df[df['type'] == 'TAX_OPTIMIZATION']['amount'].sum()
-    
-    # El coste real de fricción (restamos lo que nos han devuelto)
     coste_friccion = total_comisiones + total_impuestos - optimizacion_fiscal
     
     total_intereses = df[df['type'] == 'INTEREST_PAYMENT']['amount'].sum()
     total_dividendos = df[df['type'] == 'DIVIDEND']['amount'].sum()
 
-    # ---------------------------------------------------------
-    # PILAR 3 Y 4: CARTERA Y BENEFICIO REALIZADO
-    # ---------------------------------------------------------
+    # PILAR 3 Y 4
     cartera = {}
-    beneficio_realizado = 0.0  
+    beneficio_realizado = 0.0
+    
+    # NUEVO: Aquí guardaremos el P&L desglosado por cada empresa
+    pnl_por_activo = {}
     
     for index, row in df.iterrows():
         tipo = row['type']
@@ -60,7 +54,6 @@ def procesar_csv():
         if pd.isna(activo) or pd.isna(acciones_raw) or acciones_raw == 0:
             continue
             
-        # NUEVO: Añadido STOCKPERK (acciones gratis) y SAVINGS_PLAN (compras programadas)
         eventos_validos = ['BUY', 'SAVINGS_PLAN', 'SELL', 'SPLIT', 'REVERSE_SPLIT', 'REVERSE_STOCK_SPLIT', 'SPIN_OFF', 'MIGRATION', 'STOCKPERK']
         if tipo not in eventos_validos:
             continue
@@ -70,7 +63,6 @@ def procesar_csv():
             
         pos = cartera[activo]
         
-        # NUEVO: Procesamos tanto compras manuales como programadas
         if tipo in ['BUY', 'SAVINGS_PLAN']:
             acciones_compradas = abs(acciones_raw)
             coste_compra = acciones_compradas * precio
@@ -85,6 +77,11 @@ def procesar_csv():
             if pos['Precio_Medio'] > 0:
                 ganancia_operacion = (precio - pos['Precio_Medio']) * acciones_vendidas
                 beneficio_realizado += ganancia_operacion
+                
+                # NUEVO: Sumamos la ganancia o pérdida al historial de esa empresa en concreto
+                if activo not in pnl_por_activo:
+                    pnl_por_activo[activo] = 0.0
+                pnl_por_activo[activo] += ganancia_operacion
 
             pos['Acciones'] -= acciones_vendidas
             pos['Invertido'] -= (acciones_vendidas * pos['Precio_Medio'])
@@ -95,21 +92,24 @@ def procesar_csv():
                 pos['Precio_Medio'] = 0.0
                 
         else:
-            # EVENTOS CORPORATIVOS Y STOCKPERK
-            # Al ser acciones gratis/divididas, sumamos las acciones pero NO el capital invertido
             pos['Acciones'] += acciones_raw
             if pos['Acciones'] <= 0.0001:
                 pos['Acciones'] = 0.0
                 pos['Invertido'] = 0.0
                 pos['Precio_Medio'] = 0.0
             elif pos['Invertido'] > 0:
-                # Recalcula el precio medio a la baja (al tener más acciones por el mismo dinero)
                 pos['Precio_Medio'] = pos['Invertido'] / pos['Acciones']
 
+    # Preparamos tabla de Cartera
     df_cartera = pd.DataFrame.from_dict(cartera, orient='index')
     df_cartera = df_cartera[df_cartera['Acciones'] > 0]
     df_cartera = df_cartera.sort_values('Invertido', ascending=False)
     total_invertido_actual = df_cartera['Invertido'].sum() if not df_cartera.empty else 0.0
+
+    # NUEVO: Preparamos tabla de P&L desglosado
+    df_pnl = pd.DataFrame.from_dict(pnl_por_activo, orient='index', columns=['P&L_Bruto'])
+    # Ordenamos de mayor ganancia a mayor pérdida
+    df_pnl = df_pnl.sort_values('P&L_Bruto', ascending=False)
 
     # --- IMPRESIÓN DEL INFORME PATRIMONIAL ---
     print("="*60)
@@ -137,6 +137,18 @@ def procesar_csv():
     print(f"   => BENEFICIO NETO REAL*:   {beneficio_neto:,.2f} €")
     print("      *(Ventas + Intereses + Dividendos - Comisiones Netas)")
     
+    # NUEVO: IMPRIMIMOS EL DESGLOSE DE VENTAS
+    print("\n" + "-"*60)
+    print(" 🎯 DESGLOSE DE P&L POR ACTIVO VENDIDO (Bruto)")
+    print("-"*60)
+    if df_pnl.empty:
+        print("   No hay ventas registradas.")
+    else:
+        df_pnl_mostrar = df_pnl.copy()
+        df_pnl_mostrar['P&L_Bruto'] = df_pnl_mostrar['P&L_Bruto'].apply(lambda x: f"{x:,.2f} €")
+        pd.set_option('display.max_rows', None)
+        print(df_pnl_mostrar.to_string())
+
     print("\n" + "="*60)
     print(f" 📊 4. CARTERA ABIERTA (Invertido: {total_invertido_actual:,.2f} €)")
     print("="*60)
