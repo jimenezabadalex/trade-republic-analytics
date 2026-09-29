@@ -2,7 +2,8 @@ from datos import cargar_datos
 from calculadora import calcular_metricas
 from mercado import enriquecer_cartera
 from reporte import imprimir_informe
-from trimestres import analizar_trimestres, imprimir_trimestres # <-- NUEVO
+from trimestres import analizar_trimestres, imprimir_trimestres
+from exportador import exportar_a_excel # <-- NUEVO
 
 def main():
     # 1. Extraer
@@ -17,12 +18,15 @@ def main():
     # 3. Mercado en Tiempo Real
     metricas['df_cartera'] = enriquecer_cartera(metricas['df_cartera'], metricas['mapa_activos'])
     
-    # 4. Análisis Trimestral (NUEVO)
+    # 4. Análisis Trimestral
     df_trimestres = analizar_trimestres(df, metricas['df_ventas'])
     
-    # 5. Imprimir Informes
+    # 5. Imprimir Informes en Consola
     imprimir_informe(nombre_archivo, metricas)
-    imprimir_trimestres(df_trimestres) # <-- NUEVO
+    imprimir_trimestres(df_trimestres)
+    
+    # 6. Exportar a Excel (NUEVO)
+    exportar_a_excel(metricas, df_trimestres)
 
 if __name__ == "__main__":
     main()
