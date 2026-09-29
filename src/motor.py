@@ -34,7 +34,7 @@ def procesar_csv():
     coste_friccion = df['fee'].sum() + df['tax'].sum()
     total_intereses = df[df['type'] == 'INTEREST_PAYMENT']['amount'].sum()
 
-    # ---------------------------------------------------------
+   # ---------------------------------------------------------
     # PILAR 3: CARTERA VIVA Y PRECIO MEDIO (Average Cost Basis)
     # ---------------------------------------------------------
     cartera = {}
@@ -42,7 +42,10 @@ def procesar_csv():
     for index, row in df.iterrows():
         tipo = row['type']
         activo = row['name']
-        acciones = row['shares']
+        
+        # PARCHE 1: Usamos abs() para garantizar que las acciones siempre sean positivas.
+        # Así, restaremos correctamente al vender, ponga TR un signo menos o no.
+        acciones = abs(row['shares']) 
         precio = row['price']
         
         # Solo procesamos compras y ventas de activos válidos
@@ -64,11 +67,12 @@ def procesar_csv():
                 
         elif tipo == 'SELL':
             pos['Acciones'] -= acciones
-            # Reducimos el capital invertido proporcionalmente
+            # Reducimos el capital invertido proporcionalmente al precio medio histórico
             pos['Invertido'] -= (acciones * pos['Precio_Medio'])
             
-            # Limpieza por errores de redondeo de decimales (ej. 0.000000001 acciones)
-            if pos['Acciones'] <= 1e-6:
+            # PARCHE 2: Margen de error más amplio (0.0001 en lugar de 1e-6)
+            # A veces TR vende "todas" tus acciones pero por redondeo de euros queda 0.00001
+            if pos['Acciones'] <= 0.0001:
                 pos['Acciones'] = 0.0
                 pos['Invertido'] = 0.0
                 pos['Precio_Medio'] = 0.0
