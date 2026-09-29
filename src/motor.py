@@ -15,42 +15,53 @@ def procesar_csv():
     
     df = pd.read_csv(archivo)
     
-    # 0. LIMPIEZA Y PREPARACIÓN DE DATOS
     for col in ['amount', 'fee', 'tax', 'shares', 'price']:
         if col in df.columns:
             df[col] = df[col].fillna(0.0)
             
-    # CRUCIAL: Ordenamos cronológicamente (del más antiguo al más nuevo)
-    # Trade Republic los da del más nuevo al más antiguo, si no le damos la vuelta, las mates fallan.
     df['datetime'] = pd.to_datetime(df['datetime'])
     df = df.sort_values('datetime', ascending=True).reset_index(drop=True)
 
-    # Variables Pilares 1 y 2
-    tipos_ingreso = ['TRANSFER_INSTANT_INBOUND', 'CUSTOMER_INPAYMENT']
-    tipos_retirada = ['TRANSFER_INSTANT_OUTBOUND']
+    # ---------------------------------------------------------
+    # PILAR 1 Y 2: FLUJOS DE CAJA Y COSTES
+    # ---------------------------------------------------------
+    # NUEVO: Añadidos nombres de transferencias estándar por si dejas de usar las instantáneas
+    tipos_ingreso = ['TRANSFER_INSTANT_INBOUND', 'CUSTOMER_INPAYMENT', 'TRANSFER_INBOUND']
+    tipos_retirada = ['TRANSFER_INSTANT_OUTBOUND', 'TRANSFER_OUTBOUND']
+    
     total_ingresado = df[df['type'].isin(tipos_ingreso)]['amount'].sum()
     total_retirado = df[df['type'].isin(tipos_retirada)]['amount'].sum()
     capital_neto = total_ingresado + total_retirado
-    coste_friccion = df['fee'].sum() + df['tax'].sum()
+    
+    total_comisiones = df['fee'].sum()
+    total_impuestos = df['tax'].sum()
+    
+    # NUEVO: Capturamos la devolución de impuestos (su amount suele ser positivo)
+    optimizacion_fiscal = df[df['type'] == 'TAX_OPTIMIZATION']['amount'].sum()
+    
+    # El coste real de fricción (restamos lo que nos han devuelto)
+    coste_friccion = total_comisiones + total_impuestos - optimizacion_fiscal
+    
     total_intereses = df[df['type'] == 'INTEREST_PAYMENT']['amount'].sum()
+    total_dividendos = df[df['type'] == 'DIVIDEND']['amount'].sum()
 
-   # ---------------------------------------------------------
-    # PILAR 3: CARTERA VIVA Y PRECIO MEDIO (Average Cost Basis)
+    # ---------------------------------------------------------
+    # PILAR 3 Y 4: CARTERA Y BENEFICIO REALIZADO
     # ---------------------------------------------------------
     cartera = {}
+    beneficio_realizado = 0.0  
     
     for index, row in df.iterrows():
         tipo = row['type']
         activo = row['name']
-        acciones_raw = row['shares'] # Lo cogemos en bruto (con su signo original)
+        acciones_raw = row['shares']
         precio = row['price']
         
-        # Filtramos para asegurarnos de que la fila tiene datos válidos
         if pd.isna(activo) or pd.isna(acciones_raw) or acciones_raw == 0:
             continue
             
-        # Tipos que afectan a nuestra cartera de acciones
-        eventos_validos = ['BUY', 'SELL', 'SPLIT', 'REVERSE_SPLIT', 'REVERSE_STOCK_SPLIT', 'SPIN_OFF', 'MIGRATION']
+        # NUEVO: Añadido STOCKPERK (acciones gratis) y SAVINGS_PLAN (compras programadas)
+        eventos_validos = ['BUY', 'SAVINGS_PLAN', 'SELL', 'SPLIT', 'REVERSE_SPLIT', 'REVERSE_STOCK_SPLIT', 'SPIN_OFF', 'MIGRATION', 'STOCKPERK']
         if tipo not in eventos_validos:
             continue
             
@@ -59,7 +70,8 @@ def procesar_csv():
             
         pos = cartera[activo]
         
-        if tipo == 'BUY':
+        # NUEVO: Procesamos tanto compras manuales como programadas
+        if tipo in ['BUY', 'SAVINGS_PLAN']:
             acciones_compradas = abs(acciones_raw)
             coste_compra = acciones_compradas * precio
             pos['Invertido'] += coste_compra
@@ -70,37 +82,34 @@ def procesar_csv():
                 
         elif tipo == 'SELL':
             acciones_vendidas = abs(acciones_raw)
+            if pos['Precio_Medio'] > 0:
+                ganancia_operacion = (precio - pos['Precio_Medio']) * acciones_vendidas
+                beneficio_realizado += ganancia_operacion
+
             pos['Acciones'] -= acciones_vendidas
-            # Reducimos el capital invertido proporcionalmente
             pos['Invertido'] -= (acciones_vendidas * pos['Precio_Medio'])
             
-            # Limpieza por decimales
             if pos['Acciones'] <= 0.0001:
                 pos['Acciones'] = 0.0
                 pos['Invertido'] = 0.0
                 pos['Precio_Medio'] = 0.0
                 
         else:
-            # EVENTOS CORPORATIVOS (Splits, Reverse Splits, etc.)
-            # Sumamos directamente el valor bruto (si es un reverse_split negativo como Tonix, restará)
+            # EVENTOS CORPORATIVOS Y STOCKPERK
+            # Al ser acciones gratis/divididas, sumamos las acciones pero NO el capital invertido
             pos['Acciones'] += acciones_raw
-            
             if pos['Acciones'] <= 0.0001:
-                # Si el evento vacía la cartera (como te pasó con Tonix)
                 pos['Acciones'] = 0.0
                 pos['Invertido'] = 0.0
                 pos['Precio_Medio'] = 0.0
             elif pos['Invertido'] > 0:
-                # Si te quedan acciones, el dinero invertido no cambia, pero el precio medio SÍ
+                # Recalcula el precio medio a la baja (al tener más acciones por el mismo dinero)
                 pos['Precio_Medio'] = pos['Invertido'] / pos['Acciones']
-                
-    # Convertimos el diccionario en un DataFrame para mostrarlo bonito
-    df_cartera = pd.DataFrame.from_dict(cartera, orient='index')
-    # Filtramos para mostrar solo las posiciones que aún tienes abiertas (>0)
-    df_cartera = df_cartera[df_cartera['Acciones'] > 0]
-    # Ordenamos de mayor a menor capital invertido
-    df_cartera = df_cartera.sort_values('Invertido', ascending=False)
 
+    df_cartera = pd.DataFrame.from_dict(cartera, orient='index')
+    df_cartera = df_cartera[df_cartera['Acciones'] > 0]
+    df_cartera = df_cartera.sort_values('Invertido', ascending=False)
+    total_invertido_actual = df_cartera['Invertido'].sum() if not df_cartera.empty else 0.0
 
     # --- IMPRESIÓN DEL INFORME PATRIMONIAL ---
     print("="*60)
@@ -111,28 +120,37 @@ def procesar_csv():
     print(f"   => CAPITAL NETO EN RIESGO: {capital_neto:,.2f} €")
     
     print("\n🩸 2. COSTES DE FRICCIÓN (EFICIENCIA)")
-    print(f"   => Comisiones e Impuestos: {coste_friccion:,.2f} €")
+    print(f"   - Comisiones Brutas:       {total_comisiones:,.2f} €")
+    print(f"   - Impuestos Retenidos:     {total_impuestos:,.2f} €")
+    if optimizacion_fiscal > 0:
+        print(f"   + Ajustes/Devoluciones TR: {optimizacion_fiscal:,.2f} €")
+    print(f"   ---------------------------------------")
+    print(f"   => COSTE DE FRICCIÓN NETO: {coste_friccion:,.2f} €")
     
-    print("\n💸 3. RENDIMIENTO PASIVO")
-    print(f"   => Intereses de la cuenta: {total_intereses:,.2f} €")
+    print("\n📈 3. RENTABILIDAD REALIZADA E INGRESOS (PILAR 4)")
+    print(f"   + Intereses de la cuenta:  {total_intereses:,.2f} €")
+    print(f"   + Dividendos cobrados:     {total_dividendos:,.2f} €")
+    print(f"   + P&L Ventas (Bruto):      {beneficio_realizado:,.2f} €")
+    print(f"   ---------------------------------------")
+    
+    beneficio_neto = beneficio_realizado + total_intereses + total_dividendos + coste_friccion
+    print(f"   => BENEFICIO NETO REAL*:   {beneficio_neto:,.2f} €")
+    print("      *(Ventas + Intereses + Dividendos - Comisiones Netas)")
     
     print("\n" + "="*60)
-    print(" 📊 4. CARTERA ABIERTA (POSICIONES ACTUALES)")
+    print(f" 📊 4. CARTERA ABIERTA (Invertido: {total_invertido_actual:,.2f} €)")
     print("="*60)
     
     if df_cartera.empty:
         print("   No hay posiciones abiertas actualmente.")
     else:
-        # Formateamos los números para que se vean como moneda y con 2/4 decimales
         df_mostrar = df_cartera.copy()
         df_mostrar['Acciones'] = df_mostrar['Acciones'].apply(lambda x: f"{x:,.4f}")
         df_mostrar['Precio_Medio'] = df_mostrar['Precio_Medio'].apply(lambda x: f"{x:,.2f} €")
         df_mostrar['Invertido'] = df_mostrar['Invertido'].apply(lambda x: f"{x:,.2f} €")
         
-        # Ajustamos para que Pandas imprima todas las filas en la consola
         pd.set_option('display.max_rows', None)
         print(df_mostrar.to_string())
 
 if __name__ == "__main__":
     procesar_csv()
-    
