@@ -1,7 +1,6 @@
 import pandas as pd
 
 def calcular_metricas(df):
-    # PILAR 1 Y 2
     tipos_ingreso = ['TRANSFER_INSTANT_INBOUND', 'CUSTOMER_INPAYMENT', 'TRANSFER_INBOUND']
     tipos_retirada = ['TRANSFER_INSTANT_OUTBOUND', 'TRANSFER_OUTBOUND']
     
@@ -17,16 +16,19 @@ def calcular_metricas(df):
     total_intereses = df[df['type'] == 'INTEREST_PAYMENT']['amount'].sum()
     total_dividendos = df[df['type'] == 'DIVIDEND']['amount'].sum()
 
-    # PILAR 3 Y 4
     cartera = {}
     beneficio_realizado = 0.0
     pnl_por_activo = {}
+    
+    # NUEVO: Aquí guardaremos la fecha y el beneficio de cada venta
+    registro_ventas = [] 
     
     for index, row in df.iterrows():
         tipo = row['type']
         activo = row['name']
         acciones_raw = row['shares']
         precio = row['price']
+        fecha = row['datetime']
         
         if pd.isna(activo) or pd.isna(acciones_raw) or acciones_raw == 0:
             continue
@@ -57,33 +59,30 @@ def calcular_metricas(df):
                 if activo not in pnl_por_activo:
                     pnl_por_activo[activo] = 0.0
                 pnl_por_activo[activo] += ganancia_operacion
+                
+                # NUEVO: Guardamos el ticket de la venta
+                registro_ventas.append({
+                    'datetime': fecha,
+                    'Activo': activo,
+                    'PnL_Venta': ganancia_operacion
+                })
 
             pos['Acciones'] -= acciones_vendidas
             pos['Invertido'] -= (acciones_vendidas * pos['Precio_Medio'])
             
-            # Solo en una VENTA confirmamos que si te quedas sin acciones, se resetea todo a 0
             if pos['Acciones'] <= 0.0001:
                 pos['Acciones'] = 0.0
                 pos['Invertido'] = 0.0
                 pos['Precio_Medio'] = 0.0
                 
         else:
-            # ----------------------------------------------------
-            # CORRECCIÓN DE LA TRAMPA DE LOS REVERSE SPLITS
-            # ----------------------------------------------------
             pos['Acciones'] += acciones_raw
-            # ¡NUNCA reseteamos el Invertido a 0 en eventos corporativos!
-            # Tu dinero real sigue ahí dentro. Al darte las nuevas acciones en la 
-            # siguiente fila, el Precio_Medio se recalculará mágicamente y absorberá tus pérdidas.
             if pos['Acciones'] > 0.0001 and pos['Invertido'] > 0:
                 pos['Precio_Medio'] = pos['Invertido'] / pos['Acciones']
             elif pos['Acciones'] <= 0.0001:
-                # Solo limpiamos las acciones residuales, pero guardamos la memoria de tu Invertido
                 pos['Acciones'] = 0.0
                 pos['Precio_Medio'] = 0.0
-            # ----------------------------------------------------
 
-    # Preparamos DataFrames finales
     df_cartera = pd.DataFrame.from_dict(cartera, orient='index')
     if not df_cartera.empty:
         df_cartera = df_cartera[df_cartera['Acciones'] > 0]
@@ -97,6 +96,9 @@ def calcular_metricas(df):
     df_compras = df[df['type'].isin(['BUY', 'SAVINGS_PLAN'])].dropna(subset=['symbol', 'name'])
     mapa_activos = df_compras.drop_duplicates(subset=['name']).set_index('name')['symbol'].to_dict()
 
+    # NUEVO: Convertimos el registro a un DataFrame para dárselo a los trimestres
+    df_ventas = pd.DataFrame(registro_ventas) if registro_ventas else pd.DataFrame(columns=['datetime', 'Activo', 'PnL_Venta'])
+
     return {
         'capital_neto': capital_neto,
         'coste_friccion': coste_friccion,
@@ -109,5 +111,6 @@ def calcular_metricas(df):
         'df_cartera': df_cartera,
         'df_pnl': df_pnl,
         'total_invertido': total_invertido,
-        'mapa_activos': mapa_activos
+        'mapa_activos': mapa_activos,
+        'df_ventas': df_ventas # <--- Pasamos el diario de ventas
     }
