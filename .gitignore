@@ -1,7 +1,5 @@
 # Ignorar datos financieros personales
-data/input/*.csv
-data/input/*.xlsx
-data/output/
+data/
 
 # Ignorar archivos temporales de Python
 __pycache__/
