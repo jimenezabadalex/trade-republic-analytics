@@ -42,14 +42,16 @@ def procesar_csv():
     for index, row in df.iterrows():
         tipo = row['type']
         activo = row['name']
-        
-        # PARCHE 1: Usamos abs() para garantizar que las acciones siempre sean positivas.
-        # Así, restaremos correctamente al vender, ponga TR un signo menos o no.
-        acciones = abs(row['shares']) 
+        acciones_raw = row['shares'] # Lo cogemos en bruto (con su signo original)
         precio = row['price']
         
-        # Solo procesamos compras y ventas de activos válidos
-        if pd.isna(activo) or acciones == 0 or tipo not in ['BUY', 'SELL']:
+        # Filtramos para asegurarnos de que la fila tiene datos válidos
+        if pd.isna(activo) or pd.isna(acciones_raw) or acciones_raw == 0:
+            continue
+            
+        # Tipos que afectan a nuestra cartera de acciones
+        eventos_validos = ['BUY', 'SELL', 'SPLIT', 'REVERSE_SPLIT', 'REVERSE_STOCK_SPLIT', 'SPIN_OFF', 'MIGRATION']
+        if tipo not in eventos_validos:
             continue
             
         if activo not in cartera:
@@ -58,25 +60,40 @@ def procesar_csv():
         pos = cartera[activo]
         
         if tipo == 'BUY':
-            nuevo_total = pos['Acciones'] + acciones
-            coste_compra = acciones * precio
+            acciones_compradas = abs(acciones_raw)
+            coste_compra = acciones_compradas * precio
             pos['Invertido'] += coste_compra
-            pos['Acciones'] = nuevo_total
+            pos['Acciones'] += acciones_compradas
+            
             if pos['Acciones'] > 0:
                 pos['Precio_Medio'] = pos['Invertido'] / pos['Acciones']
                 
         elif tipo == 'SELL':
-            pos['Acciones'] -= acciones
-            # Reducimos el capital invertido proporcionalmente al precio medio histórico
-            pos['Invertido'] -= (acciones * pos['Precio_Medio'])
+            acciones_vendidas = abs(acciones_raw)
+            pos['Acciones'] -= acciones_vendidas
+            # Reducimos el capital invertido proporcionalmente
+            pos['Invertido'] -= (acciones_vendidas * pos['Precio_Medio'])
             
-            # PARCHE 2: Margen de error más amplio (0.0001 en lugar de 1e-6)
-            # A veces TR vende "todas" tus acciones pero por redondeo de euros queda 0.00001
+            # Limpieza por decimales
             if pos['Acciones'] <= 0.0001:
                 pos['Acciones'] = 0.0
                 pos['Invertido'] = 0.0
                 pos['Precio_Medio'] = 0.0
-
+                
+        else:
+            # EVENTOS CORPORATIVOS (Splits, Reverse Splits, etc.)
+            # Sumamos directamente el valor bruto (si es un reverse_split negativo como Tonix, restará)
+            pos['Acciones'] += acciones_raw
+            
+            if pos['Acciones'] <= 0.0001:
+                # Si el evento vacía la cartera (como te pasó con Tonix)
+                pos['Acciones'] = 0.0
+                pos['Invertido'] = 0.0
+                pos['Precio_Medio'] = 0.0
+            elif pos['Invertido'] > 0:
+                # Si te quedan acciones, el dinero invertido no cambia, pero el precio medio SÍ
+                pos['Precio_Medio'] = pos['Invertido'] / pos['Acciones']
+                
     # Convertimos el diccionario en un DataFrame para mostrarlo bonito
     df_cartera = pd.DataFrame.from_dict(cartera, orient='index')
     # Filtramos para mostrar solo las posiciones que aún tienes abiertas (>0)
