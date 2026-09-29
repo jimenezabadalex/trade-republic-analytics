@@ -1,7 +1,6 @@
 import pandas as pd
 
 def calcular_metricas(df):
-    """Realiza todos los cálculos financieros y devuelve un diccionario con los resultados."""
     # PILAR 1 Y 2
     tipos_ingreso = ['TRANSFER_INSTANT_INBOUND', 'CUSTOMER_INPAYMENT', 'TRANSFER_INBOUND']
     tipos_retirada = ['TRANSFER_INSTANT_OUTBOUND', 'TRANSFER_OUTBOUND']
@@ -61,19 +60,28 @@ def calcular_metricas(df):
 
             pos['Acciones'] -= acciones_vendidas
             pos['Invertido'] -= (acciones_vendidas * pos['Precio_Medio'])
+            
+            # Solo en una VENTA confirmamos que si te quedas sin acciones, se resetea todo a 0
             if pos['Acciones'] <= 0.0001:
                 pos['Acciones'] = 0.0
                 pos['Invertido'] = 0.0
                 pos['Precio_Medio'] = 0.0
                 
         else:
+            # ----------------------------------------------------
+            # CORRECCIÓN DE LA TRAMPA DE LOS REVERSE SPLITS
+            # ----------------------------------------------------
             pos['Acciones'] += acciones_raw
-            if pos['Acciones'] <= 0.0001:
-                pos['Acciones'] = 0.0
-                pos['Invertido'] = 0.0
-                pos['Precio_Medio'] = 0.0
-            elif pos['Invertido'] > 0:
+            # ¡NUNCA reseteamos el Invertido a 0 en eventos corporativos!
+            # Tu dinero real sigue ahí dentro. Al darte las nuevas acciones en la 
+            # siguiente fila, el Precio_Medio se recalculará mágicamente y absorberá tus pérdidas.
+            if pos['Acciones'] > 0.0001 and pos['Invertido'] > 0:
                 pos['Precio_Medio'] = pos['Invertido'] / pos['Acciones']
+            elif pos['Acciones'] <= 0.0001:
+                # Solo limpiamos las acciones residuales, pero guardamos la memoria de tu Invertido
+                pos['Acciones'] = 0.0
+                pos['Precio_Medio'] = 0.0
+            # ----------------------------------------------------
 
     # Preparamos DataFrames finales
     df_cartera = pd.DataFrame.from_dict(cartera, orient='index')
@@ -86,6 +94,9 @@ def calcular_metricas(df):
     if not df_pnl.empty:
         df_pnl = df_pnl.sort_values('P&L_Bruto', ascending=False)
 
+    df_compras = df[df['type'].isin(['BUY', 'SAVINGS_PLAN'])].dropna(subset=['symbol', 'name'])
+    mapa_activos = df_compras.drop_duplicates(subset=['name']).set_index('name')['symbol'].to_dict()
+
     return {
         'capital_neto': capital_neto,
         'coste_friccion': coste_friccion,
@@ -97,5 +108,6 @@ def calcular_metricas(df):
         'beneficio_realizado': beneficio_realizado,
         'df_cartera': df_cartera,
         'df_pnl': df_pnl,
-        'total_invertido': total_invertido
+        'total_invertido': total_invertido,
+        'mapa_activos': mapa_activos
     }

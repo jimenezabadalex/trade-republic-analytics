@@ -40,11 +40,21 @@ def imprimir_informe(nombre_archivo, metricas):
         pd.set_option('display.max_rows', None)
         print(df_pnl_mostrar.to_string())
 
-    print("\n" + "="*60)
-    print(f" 📊 4. CARTERA ABIERTA (Invertido: {metricas['total_invertido']:,.2f} €)")
-    print("="*60)
-    
     df_cartera = metricas['df_cartera']
+    total_invertido = metricas['total_invertido']
+    
+    if 'Valor_Actual' in df_cartera.columns:
+        total_valor_actual = df_cartera['Valor_Actual'].sum()
+        total_pnl_latente = df_cartera['PnL_Latente'].sum()
+    else:
+        total_valor_actual = total_invertido
+        total_pnl_latente = 0.0
+
+    print("\n" + "="*80)
+    print(f" 📊 4. CARTERA ABIERTA (Invertido: {total_invertido:,.2f} € | Valor Mercado: {total_valor_actual:,.2f} €)")
+    print(f"    => P&L Latente Total (Ganancia/Pérdida Actual): {total_pnl_latente:+,.2f} €")
+    print("="*80)
+    
     if df_cartera.empty:
         print("   No hay posiciones abiertas actualmente.")
     else:
@@ -53,5 +63,28 @@ def imprimir_informe(nombre_archivo, metricas):
         df_mostrar['Precio_Medio'] = df_mostrar['Precio_Medio'].apply(lambda x: f"{x:,.2f} €")
         df_mostrar['Invertido'] = df_mostrar['Invertido'].apply(lambda x: f"{x:,.2f} €")
         
+        if 'Precio_Actual' in df_mostrar.columns:
+            df_mostrar['Precio_Actual'] = df_mostrar['Precio_Actual'].apply(lambda x: f"{x:,.2f} €")
+            df_mostrar['Valor_Actual'] = df_mostrar['Valor_Actual'].apply(lambda x: f"{x:,.2f} €")
+            df_mostrar['PnL_Latente'] = df_mostrar['PnL_Latente'].apply(lambda x: f"{x:+,.2f} €")
+            df_mostrar['PnL_%'] = df_mostrar['PnL_%'].apply(lambda x: f"{x:+,.2f}%")
+            
+            # Ordenamos las columnas para que se lean de forma lógica
+            columnas = ['Acciones', 'Precio_Medio', 'Precio_Actual', 'Invertido', 'Valor_Actual', 'PnL_Latente', 'PnL_%']
+            df_mostrar = df_mostrar[columnas]
+        
         pd.set_option('display.max_rows', None)
         print(df_mostrar.to_string())
+
+    # --- NUEVO: EL "GRAN TOTAL" (Equivalente al MAX de Trade Republic) ---
+    gran_total = beneficio_neto + total_pnl_latente
+    
+    print("\n" + "="*80)
+    print(" 🏆 5. RESUMEN GLOBAL ABSOLUTO (Equivalente a 'MAX' en la App)")
+    print("="*80)
+    print(f"   Historial Cerrado (Beneficio Neto Real): {beneficio_neto:>+10.2f} €")
+    print(f"   Mercado Actual    (P&L Latente Total):   {total_pnl_latente:>+10.2f} €")
+    print("   --------------------------------------------------")
+    print(f"   => RENTABILIDAD HISTÓRICA TOTAL:         {gran_total:>+10.2f} €")
+    print("\n   *Nota: Puede diferir ligeramente de la App por el spread de divisa")
+    print("          y el uso de Lang & Schwarz vs Yahoo Finance.\n")
