@@ -1,0 +1,10 @@
+# Ignorar datos financieros personales
+data/input/*.csv
+data/input/*.xlsx
+data/output/
+
+# Ignorar archivos temporales de Python
+__pycache__/
+*.py[cod]
+.venv/
+env/
