@@ -8,9 +8,9 @@ def calcular_metricas(df):
     total_retirado = df[df['type'].isin(tipos_retirada)]['amount'].sum()
     capital_neto = total_ingresado + total_retirado
     
-    total_comisiones = df['fee'].sum()
-    total_impuestos = df['tax'].sum()
-    optimizacion_fiscal = df[df['type'] == 'TAX_OPTIMIZATION']['amount'].sum()
+    total_comisiones = abs(df['fee'].sum())
+    total_impuestos = abs(df['tax'].sum())
+    optimizacion_fiscal = abs(df[df['type'] == 'TAX_OPTIMIZATION']['amount'].sum())
     coste_friccion = total_comisiones + total_impuestos - optimizacion_fiscal
     
     total_intereses = df[df['type'] == 'INTEREST_PAYMENT']['amount'].sum()

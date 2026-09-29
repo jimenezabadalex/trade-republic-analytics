@@ -24,7 +24,7 @@ def imprimir_informe(nombre_archivo, metricas):
     print(f"   + P&L Ventas (Bruto):      {metricas['beneficio_realizado']:,.2f} €")
     print(f"   ---------------------------------------")
     
-    beneficio_neto = metricas['beneficio_realizado'] + metricas['intereses'] + metricas['dividendos'] + metricas['coste_friccion']
+    beneficio_neto = metricas['beneficio_realizado'] + metricas['intereses'] + metricas['dividendos'] - metricas['coste_friccion']
     print(f"   => BENEFICIO NETO REAL*:   {beneficio_neto:,.2f} €")
     print("      *(Ventas + Intereses + Dividendos - Comisiones Netas)")
     
